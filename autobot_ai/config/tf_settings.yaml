@@ -1,0 +1,18 @@
+# Frame names must match physical robot configuration
+frames:
+  map_frame: map
+  odom_frame: odom
+  base_frame: base_link
+  utm_frame: utm
+
+# Transform tolerances (seconds)
+tolerances:
+  costmap_transform: 5.0
+  sensor_transform: 3.0
+  ekf_initialization: 10.0
+
+# EKF settings
+ekf:
+  publish_tf: true
+  tf_delay: 0.05
+  tf_timeout: 5.0
