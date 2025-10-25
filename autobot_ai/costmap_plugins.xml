@@ -1,9 +1,0 @@
-<library path="lib/libsemantic_layer">
-  <class name="costmap_2d/SemanticLayer" 
-         type="costmap_2d::SemanticLayer" 
-         base_class_type="costmap_2d::Layer">
-    <description>
-      Semantic layer for AI-generated costmaps
-    </description>
-  </class>
-</library>
