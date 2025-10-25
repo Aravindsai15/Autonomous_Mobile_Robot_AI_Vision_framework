@@ -1,0 +1,331 @@
+<launch>
+  <!-- Environment Variables -->
+  <env name="LD_PRELOAD" value="/usr/lib/aarch64-linux-gnu/libgomp.so.1" />
+  <env name="OMP_NUM_THREADS" value="1" />
+  <env name="MKL_NUM_THREADS" value="1" />
+  <env name="OPENBLAS_NUM_THREADS" value="1" />
+
+
+  <!-- ============================================= -->
+  <!-- 1. Static Transforms -->
+  <!-- ============================================= -->
+  <!-- ========== CORE TF TREE ========== -->
+  <!-- World/Mapping Frames -->
+  <node pkg="tf" type="static_transform_publisher" name="map_to_utm"
+        args="0 0 0 0 0 0 map utm 100"/>
+
+  <node pkg="tf" type="static_transform_publisher" name="utm_to_odom"
+        args="0 0 0 0 0 0 utm odom 100"/>
+
+  <!-- Robot Base -->
+  <node pkg="tf" type="static_transform_publisher" name="odom_to_base_link"
+        args="0 0 0 0 0 0 odom base_link 100"/>
+
+  <!-- ========== SENSOR FRAMES ========== -->
+  <node pkg="tf" type="static_transform_publisher" name="base_to_imu"
+        args="0.1 0 0.2 0 0 0 base_link imu_link 100"/>
+
+  <node pkg="tf" type="static_transform_publisher" name="base_to_camera"
+        args="0 0 0.5 -1.5708 0 -1.5708 base_link camera_color_optical_frame 100"/>
+
+  <node pkg="tf" type="static_transform_publisher" name="base_to_gps"
+        args="0 0 0 0 0 0 base_link gps 100"/>
+
+        <!-- Add this to your static transforms section
+  <node pkg="tf" type="static_transform_publisher" name="map_to_costmap"
+        args="0 0 0 0 0 0 map costmap 100"/> -->
+
+
+
+  <!-- ============================================= -->
+  <!-- 2. Sensor Nodes -->
+  <!-- ============================================= -->
+  <!-- USB Camera Node -->
+  <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="screen" respawn="true">
+    <param name="video_device" value="/dev/video0"/>
+    <param name="camera_frame_id" value="camera_link"/>
+    <param name="image_width" value="640"/>
+    <param name="image_height" value="480"/>
+    <param name="framerate" value="15"/>
+    <param name="pixel_format" value="yuyv"/>
+    <param name="camera_info_url" value="file://$(find usb_cam)/camera_info/camera.yaml"/>
+    <param name="camera_name" value="usb_cam"/>
+    <remap from="/usb_cam/image_raw" to="camera/color/image_raw"/>
+  </node>
+
+  <!-- IMU Node -->
+  <node pkg="autobot_ai" type="imu_9axis_node.py" name="imu_9axis_node" output="screen">
+    <param name="i2c_bus" value="1"/>
+    <param name="i2c_address" value="40"/>
+    <param name="frame_id" value="imu_link"/>
+    <param name="publish_rate" value="10.0"/>
+    <param name="orientation_covariance" value="0.05"/>
+    <param name="angular_velocity_covariance" value="0.02"/>
+    <param name="linear_acceleration_covariance" value="0.04"/>
+    <remap from="/sensors/imu/data" to="/imu/data"/>
+    <remap from="/imu/mag" to="/mag"/>
+  </node>
+
+  <!-- GPS Serial Driver -->
+  <node pkg="nmea_navsat_driver" type="nmea_serial_driver" name="nmea_serial_driver" output="screen">
+    <param name="port" value="/dev/ttyTHS1"/>
+    <param name="baud" value="9600"/>
+    <param name="frame_id" value="gps"/>
+    <remap from="/fix" to="/sensors/gps/fix"/> 
+  </node>
+
+  <!-- ============================================= -->
+  <!-- 3. Localization Nodes (Adapted from previous code) -->
+  <!-- ============================================= -->
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_se" clear_params="true" output="screen">
+    <param name="frequency" value="10"/>
+    <param name="sensor_timeout" value="2.0"/>
+    <param name="two_d_mode" value="false"/>  
+    <param name="map_frame" value="map"/>
+    <param name="odom_frame" value="odom"/>
+    <param name="publish_tf" value="false"/>
+
+    <param name="base_link_frame" value="base_link"/>
+    <param name="world_frame" value="odom"/> 
+    <param name="print_diagnostics" value="true"/>
+    <param name="debug" value="false"/>
+    <param name="debug_out_file" value="/tmp/debug.txt"/>
+
+    <!-- IMU Configuration -->
+    <param name="imu0" value="/imu/data"/>
+    <rosparam param="imu0_config">[false, false, false,
+                                  true,  true,  true,
+                                  false, false, false,
+                                  true,  true,  true,
+                                  true,  true,  true]</rosparam>
+    <param name="imu0_differential" value="false"/>
+    <param name="imu0_remove_gravitational_acceleration" value="true"/>
+
+    <!-- GPS Odometry Configuration -->
+    <param name="odom0" value="/odometry/gps"/>
+    <rosparam param="odom0_config">[true, true, true,
+                                   false, false, false,
+                                   false, false, false,
+                                   false, false, false,
+                                   false, false, false]</rosparam>
+    <param name="odom0_differential" value="false"/>
+
+    <remap from="/odometry/filtered" to="/odometry/filtered"/>
+  </node>
+
+  <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" respawn="true" output="screen">
+    <param name="magnetic_declination_radians" value="0"/>
+    <param name="broadcast_cartesian_transform" value="false"/>
+    <param name="wait_for_datum" value="true"/>
+    <param name="publish_filtered_gps" value="true"/>
+    <param name="world_frame" value="map"/>
+    <param name="utm_frame" value="utm"/>
+    <param name="base_link_frame" value="base_link"/>
+    <param name="use_odometry_yaw" value="true"/>
+    <remap from="/gps/fix" to="/sensors/gps/fix"/>
+    <remap from="/odometry/gps" to="/odometry/gps"/>
+    <remap from="/odometry/filtered" to="/odometry/filtered"/>
+    <remap from="/imu/data" to="/imu/data"/>
+    <!-- <rosparam param="datum">[LAT, LONG, ALT]</rosparam> -->
+    <rosparam param="datum">[48.0543062, 8.2031135, 0.0]</rosparam>
+
+  </node>
+
+  <!-- ============================================= -->
+  <!-- 4. Vision and Navigation Nodes -->
+  <!-- ============================================= -->
+  <node pkg="autobot_ai" type="amr_ai_vision_node.py" name="amr_ai_vision_node" output="screen">
+    <param name="use_gpu" value="false" />
+    <rosparam param="ipm_size">[160, 160]</rosparam>
+    <param name="ipm_resolution" value="0.05" />
+    <param name="camera_topic" value="/camera/color/image_raw" />
+    <param name="pose_topic" value="/odometry/filtered" />
+    <param name="enable_ipm" value="true" />
+    <param name="debug_mode" value="true" />
+    <remap from="/camera/image_raw" to="/camera/color/image_raw" />
+    <remap from="/localization/filtered_odom" to="/odometry/gps" />
+    <remap from="/semantic_costmap" to="/semantic_map" />
+  </node>
+
+  <node pkg="autobot_ai" type="odom_to_pose.py" name="odom_to_pose_node" output="screen">
+    <remap from="/input_odom" to="/odometry/filtered" />
+    <remap from="/output_pose" to="/odometry/filtered_pose" />
+  </node>
+
+    <!-- Load costmap_common -->
+  <rosparam file="$(find autobot_ai)/config/costmap_common.yaml" command="load"/>
+
+
+  <node pkg="global_planner" type="planner" name="global_planner" output="screen">
+    <!-- Core Parameters -->
+    <param name="allow_unknown" value="true"/>       <!-- Critical: Reject unknown areas -->
+    <param name="default_tolerance" value="0.5"/>     <!-- Matches your NavigationManager -->
+    <param name="use_dijkstra" value="false"/>        <!-- Disable Dijkstra -->
+    <param name="use_astar" value="true"/>            <!-- Force A* -->
+    <param name="use_grid_path" value="false"/>       <!-- Smoother interpolation -->
+    <param name="lethal_cost" value="99"/>     <!-- Treat 100 as obstacles -->
+
+    <!-- Costmap Configuration -->
+    <rosparam command="load" file="$(find autobot_ai)/config/costmap_common.yaml"/>
+    
+    <!-- Remappings -->
+    <!-- <remap from="costmap" to="/semantic_map"/>        -->
+    <remap from="make_plan" to="/global_planner/make_plan"/> 
+    
+    <!-- Optional Tuning -->
+    <param name="planner_window_x" value="10.0"/>     <!-- Planning horizon (meters) -->
+    <param name="planner_window_y" value="10.0"/>
+    <param name="publish_scale" value="100"/>         <!-- Cost scaling for visualization -->
+  </node>
+
+
+  <node pkg="autobot_ai" type="auto_navigation.py" name="auto_navigation_node" output="screen">
+      <!-- Costmap Parameters -->
+      <remap from="/local_costmap" to="/semantic_costmap"/>
+      <remap from="/global_costmap" to="/semantic_costmap"/>
+      <remap from="/global_plan" to="/global_planner/plan"/> 
+
+<!-- 
+      <param name="~costmap_width" value="50.0"/>
+      <param name="~costmap_height" value="50.0"/>
+      <param name="~costmap_resolution" value="0.1"/> -->
+      
+      <!-- Planning Parameters -->
+      <param name="~planner_frequency" value="1.0"/>
+      <param name="~controller_frequency" value="5.0"/>
+      
+      <!-- Recovery Behaviors -->
+      <param name="~clearing_rotation_allowed" value="true"/>
+      <param name="~recovery_behavior_enabled" value="true"/>
+      
+      <!-- Remappings -->
+      <remap from="/localization/filtered_odometry" to="/odometry/filtered"/>
+      <remap from="/cmd_vel" to="/nav_vel"/>
+  </node>
+
+  <!-- ============================================= -->
+  <!-- 5. Visualization and Tools -->
+  <!-- ============================================= -->
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find autobot_ai)/rviz/ai_vision.rviz" output="screen" />
+  <node pkg="rqt_graph" type="rqt_graph" name="rqt_graph" />
+  <node pkg="rqt_topic" type="rqt_topic" name="rqt_topic" />
+</launch>
+
+
+
+<!-- 
+  <node pkg="realsense2_camera" type="realsense2_camera_node" name="realsense_node" output="screen" respawn="true">
+    <param name="base_frame_id" value="camera_link"/>
+    <param name="enable_depth" value="true"/>
+    <param name="enable_color" value="true"/>
+    <param name="enable_infra" value="false"/>
+    
+    <param name="color_width" value="640"/>
+    <param name="color_height" value="480"/>
+    <param name="color_fps" value="15"/>
+    <param name="depth_width" value="424"/>
+    <param name="depth_height" value="240"/>
+    <param name="depth_fps" value="15"/>
+    
+    <param name="enable_pointcloud" value="false"/>
+    <param name="align_depth" value="false"/>
+    <param name="filters" value=""/>
+    
+    <param name="clip_distance" value="1.0"/>
+    <param name="linear_accel_cov" value="0.01"/>
+    
+    <remap from="depth/image_rect_raw" to="camera/depth/image_raw"/>
+    <remap from="color/image_raw" to="camera/color/image_raw"/>
+  </node> -->
+
+
+
+
+  <!-- <node pkg="autobot_ai" type="imu_9axis_node.py" name="imu_9axis_node" output="screen">
+      <param name="i2c_bus" value="1"/>
+      <param name="i2c_address" value="40"/>
+      <param name="frame_id" value="imu_link"/>
+      <param name="publish_rate" value="10.0"/>
+      <param name="orientation_covariance" value="0.05"/>
+      <param name="angular_velocity_covariance" value="0.02"/>
+      <param name="linear_acceleration_covariance" value="0.04"/>
+      <remap from="/sensors/imu/data" to="/imu/data"/>
+      <remap from="/imu/mag" to="/mag"/>
+  </node> -->
+
+
+<!-- 
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_filter_node"
+        launch-prefix="bash -c 'sleep 5.0; $0 $@'" output="screen">
+      <param name="world_frame" value="map"/>
+      <param name="frequency" value="10.0"/>
+      <param name="sensor_timeout" value="1.0"/>
+      <param name="two_d_mode" value="true"/>
+      <param name="odom_frame" value="odom"/>
+      <param name="base_link_frame" value="base_link"/>
+      <param name="imu0" value="/imu/data"/>
+      <rosparam param="imu0_config">[false, false, false, 
+                                    true, true, true,
+                                    true, true, true, 
+                                    false, false, false]</rosparam>
+      <param name="odom0" value="/odometry/gps"/>
+      <rosparam param="odom0_config">[true, true, false, false, false, false, false, false, false]</rosparam>
+      <param name="use_odometry_yaw" value="false"/>
+      <param name="print_diagnostics" value="true"/>
+      <param name="transform_timeout" value="0.2"/>
+      <param name="transform_time_offset" value="0.1"/>
+      <remap from="odometry/filtered" to="/localization/filtered_odometry"/>
+  </node> -->
+
+
+
+<!-- 
+  <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" output="screen">
+      <param name="world_frame" value="map"/>
+      <param name="utm_frame" value="utm"/>
+      <param name="utm_zone" value="32N"/>
+      <rosparam param="datum">[48.0543062, 8.2031135, 0.0]</rosparam>
+      <param name="broadcast_cartesian_transform" value="true"/>
+      <param name="use_local_cartesian" value="false"/>
+      <param name="zero_altitude" value="true"/>
+      <param name="position_covariance_type" value="3"/>
+      <param name="delay" value="5.0"/>
+      <param name="wait_for_datum" value="true"/>
+      <param name="publish_filtered_gps" value="true"/>
+      <remap from="imu/data" to="/imu/data"/>
+      <remap from="gps/fix" to="/sensors/gps/fix"/>
+      <remap from="odometry/gps" to="/odometry/gps"/>
+      <remap from="odometry/filtered" to="/localization/filtered_odometry"/>
+  </node> -->
+
+
+ <!-- GPS Node -->
+  <!-- <node pkg="nmea_navsat_driver" type="nmea_serial_driver" name="nmea_serial_driver" output="screen">
+      <param name="port" value="/dev/ttyTHS1" />
+      <param name="baud" value="9600" /> 
+      <param name="frame_id" value="gps" />
+      <param name="time_ref_source" value="gps" />
+      <param name="useRMC" value="false" />
+      <remap from="/fix" to="/sensors/gps/fix" />
+  </node> -->
+
+
+    <!-- <node pkg="global_planner" type="planner" name="global_planner" output="screen">
+      <param name="allow_unknown" value="true"/>
+      <param name="default_tolerance" value="0.5"/>
+      
+      <param name="costmap/width" value="50.0"/>
+      <param name="costmap/height" value="50.0"/>
+      <param name="costmap/resolution" value="0.1"/>
+      
+      <param name="use_dijkstra" value="false"/>
+      <param name="use_astar" value="true"/>
+      <param name="use_grid_path" value="false"/>
+      <param name="use_quadratic" value="true"/>
+      
+      <remap from="costmap" to="/semantic_map"/>
+      <remap from="make_plan" to="/global_planner/make_plan"/>
+  </node> -->
+
+
+

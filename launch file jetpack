@@ -1,0 +1,187 @@
+<launch>
+  <!-- Environment Variables -->
+  <env name="LD_PRELOAD" value="/usr/lib/aarch64-linux-gnu/libgomp.so.1" />
+  <env name="OMP_NUM_THREADS" value="1" />
+  <env name="MKL_NUM_THREADS" value="1" />
+  <env name="OPENBLAS_NUM_THREADS" value="1" />
+
+  <!-- ============================================= -->
+  <!-- 1. Static Transforms -->
+  <!-- ============================================= -->
+  <node pkg="tf" type="static_transform_publisher" name="odom_to_base_tf"
+        args="0 0 0 0 0 0 odom base_link 100" />
+  
+  <node pkg="tf" type="static_transform_publisher" name="tf_base_to_imu"
+        args="0.1 0 0.2 0 0 0 base_link imu_link 100" />
+  
+  <node pkg="tf" type="static_transform_publisher" name="camera_tf"
+        args="0 0 0.5 0 0 0 base_link camera_color_optical_frame 100" />
+  
+  <node pkg="tf" type="static_transform_publisher" name="base_to_gps"
+        args="0 0 0 0 0 0 base_link gps 100" />
+  
+  <node pkg="tf" type="static_transform_publisher" name="utm_to_odom_tf"
+        args="0 0 0 0 0 0 utm odom 100" />
+  
+  <node pkg="tf" type="static_transform_publisher" name="map_to_base_tf"
+        args="0 0 0 0 0 0 map base_link 100" />
+
+  <!-- ============================================= -->
+  <!-- 2. Sensor Nodes -->
+  <!-- ============================================= -->
+  <!-- RealSense Camera -->
+
+
+  <!-- USB Camera Node for ROS Melodic -->
+  <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="screen" respawn="true">
+    <!-- Hardware Configuration -->
+    <param name="video_device" value="/dev/video0"/>
+    <param name="camera_frame_id" value="camera_link"/>
+    
+    <!-- Stream Settings (Match RealSense resolution) -->
+    <param name="image_width" value="640"/>
+    <param name="image_height" value="480"/>
+    <param name="framerate" value="15"/>
+    
+    <!-- Pixel Format Options: yuyv, mjpeg, uyvy -->
+    <param name="pixel_format" value="yuyv"/>
+    
+    <!-- Camera Info Settings -->
+    <param name="camera_info_url" value="file://$(find usb_cam)/camera_info/camera.yaml"/>
+    <param name="camera_name" value="usb_cam"/>
+    
+    <!-- Topic Remapping -->
+    <remap from="/usb_cam/image_raw" to="camera/color/image_raw"/>
+    <!-- <remap from="camera_info" to="camera/color/camera_info"/> -->
+  </node>
+
+
+  <!-- IMU Node (.py extension added) -->
+  <node pkg="autobot_ai" type="imu_9axis_node.py" name="imu_9axis_node" output="screen">
+    <param name="i2c_bus" value="1" />
+    <param name="i2c_address" value="40" /> <!-- 0x28 in decimal -->
+    <param name="frame_id" value="imu_link" />
+    <param name="publish_rate" value="30.0" />
+    <param name="orientation_covariance" value="0.05" />
+    <param name="angular_velocity_covariance" value="0.02" />
+    <param name="linear_acceleration_covariance" value="0.04" />
+    <remap from="/imu/data" to="/sensors/imu/data" />
+    <remap from="/imu/mag" to="/sensors/mag" />
+  </node>
+
+  <!-- AMR AI Vision Node (.py extension added) -->
+  <node pkg="autobot_ai" type="amr_ai_vision_node.py" name="amr_ai_vision_node" output="screen">
+    <param name="use_gpu" value="false" />
+    <rosparam param="ipm_size">[160, 160]</rosparam>
+    <param name="ipm_resolution" value="0.05" />
+    <param name="camera_topic" value="/camera/color/image_raw" />
+    <!-- <param name="camera_info_topic" value="/camera/color/camera_info"/> -->
+    <param name="pose_topic" value="/odometry/gps" />
+    <param name="enable_ipm" value="true" />
+    <param name="debug_mode" value="true" />
+    <remap from="/camera/image_raw" to="/camera/color/image_raw" />
+    <!-- <remap from="/camera/camera_info" to="/camera/color/camera_info"/> -->
+
+    
+    <remap from="/localization/filtered_odom" to="/odometry/gps" />
+    <remap from="/semantic_costmap" to="/semantic_map" />
+  </node>
+
+  <!-- Delayed EKF Node (using launch-prefix for delay) -->
+  <node pkg="robot_localization" type="ekf_localization_node" name="ekf_filter_node" 
+        launch-prefix="bash -c 'sleep 5.0; $0 $@'" output="screen">
+    <param name="world_frame" value="map" />
+    <param name="frequency" value="15.0" />
+    <param name="sensor_timeout" value="1.0" />
+    <param name="two_d_mode" value="true" />
+    <param name="odom_frame" value="odom" />
+    <param name="base_link_frame" value="base_link" />
+    
+    <!-- IMU Configuration -->
+    <param name="imu0" value="/sensors/imu/data" />
+    <rosparam param="imu0_config">[false, false, false, false, false, false, false, true, true, false, false, false]</rosparam>
+    
+    <!-- GPS Configuration -->
+    <param name="odom0" value="/odometry/gps" />
+    <rosparam param="odom0_config">[true, true, false, false, false, false, false, false, false]</rosparam>
+    
+    <param name="use_odometry_yaw" value="false" />
+    <param name="print_diagnostics" value="true" />
+    <param name="transform_timeout" value="0.2" />
+    <param name="transform_time_offset" value="0.1" />
+    <remap from="odometry/filtered" to="/localization/filtered_odometry" />
+  </node>
+
+  <!-- Odometry to PoseStamped converter (.py extension added) -->
+  <node pkg="autobot_ai" type="odom_to_pose.py" name="odom_to_pose_node" output="screen">
+    <remap from="/input_odom" to="/localization/filtered_odometry" />
+    <remap from="/output_pose" to="/localization/filtered_odom" />
+  </node>
+
+  <!-- ============================================= -->
+  <!-- 4. Localization Stack -->
+  <!-- ============================================= -->
+  <!-- GPS Integration -->
+  <node pkg="robot_localization" type="navsat_transform_node" name="navsat_transform_node" output="screen">
+    <param name="world_frame" value="map" />
+    <param name="utm_frame" value="utm" />
+    <param name="utm_zone" value="32N" />
+    <rosparam param="datum">[48.0543062, 8.2031135, 0.0]</rosparam>
+    <param name="broadcast_cartesian_transform" value="true" />
+    <param name="use_local_cartesian" value="false" />
+    <param name="zero_altitude" value="true" />
+    <param name="position_covariance_type" value="3" />
+    <param name="delay" value="5.0" />
+    <param name="wait_for_datum" value="true" />
+    <param name="publish_filtered_gps" value="true" />
+    <remap from="imu/data" to="/sensors/imu/data" />
+    <remap from="gps/fix" to="/sensors/gps/fix" />
+    <remap from="odometry/gps" to="/odometry/gps" />
+    <remap from="odometry/filtered" to="/localization/filtered_odometry" />
+  </node>
+
+  <!-- Auto Navigation Node (.py extension added) -->
+  <node pkg="autobot_ai" type="auto_navigation.py" name="auto_navigation_node" output="screen">
+    <param name="local_costmap_topic" value="/semantic_map" />
+    <param name="goal_tolerance" value="0.5" />
+    <param name="replan_interval" value="10.0" />
+    <param name="assumed_speed" value="0.5" />
+    <param name="max_dead_reckoning_distance" value="50.0" />
+    <remap from="/odom" to="/localization/filtered_odom" />
+    <remap from="/goal_pose" to="/goal_pose" />
+    <remap from="/cmd_vel" to="/nav_vel" />
+    <remap from="/global_path" to="/navigation/global_path" />
+  </node>
+
+  <!-- Visualization -->
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find autobot_ai)/rviz/ai_vision.rviz" output="screen" />
+
+  <!-- Optional Diagnostic Tools -->
+  <node pkg="rqt_graph" type="rqt_graph" name="rqt_graph" />
+  <node pkg="rqt_topic" type="rqt_topic" name="rqt_topic" />
+</launch>
+
+<!-- 
+  <node pkg="realsense2_camera" type="realsense2_camera_node" name="realsense_node" output="screen" respawn="true">
+    <param name="base_frame_id" value="camera_link"/>
+    <param name="enable_depth" value="true"/>
+    <param name="enable_color" value="true"/>
+    <param name="enable_infra" value="false"/>
+    
+    <param name="color_width" value="640"/>
+    <param name="color_height" value="480"/>
+    <param name="color_fps" value="15"/>
+    <param name="depth_width" value="424"/>
+    <param name="depth_height" value="240"/>
+    <param name="depth_fps" value="15"/>
+    
+    <param name="enable_pointcloud" value="false"/>
+    <param name="align_depth" value="false"/>
+    <param name="filters" value=""/>
+    
+    <param name="clip_distance" value="1.0"/>
+    <param name="linear_accel_cov" value="0.01"/>
+    
+    <remap from="depth/image_rect_raw" to="camera/depth/image_raw"/>
+    <remap from="color/image_raw" to="camera/color/image_raw"/>
+  </node> -->

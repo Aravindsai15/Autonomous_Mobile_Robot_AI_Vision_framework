@@ -1,0 +1,115 @@
+frequency: 15.0
+transform_tolerance: 0.3  # Higher tolerance
+
+world_frame: map
+
+sensor_timeout: 1.0
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+
+print_diagnostics: true
+debug: true
+two_d_mode: true                # Constrain to 2D plane
+# transform_time_offset: 0.0      # No artificial delay
+# transform_timeout: 0.0          # Disable transform timeout
+predict_to_current_time: false  # Disable for low-frequency global EKF
+
+# GPS 
+odom0: /odometry/gps
+odom0_config: [true, true, false,   # Fuse XYZ position
+               false, false, false,
+               false, false, false,
+               false, false, false,
+               false, false, false]
+odom0_differential: false
+odom0_queue_size: 10
+# odom0_relative: false
+odom0_pose_rejection_threshold: 3.0  # Meters
+
+
+# Stereo Odometry (relative position when GPS drops)
+odom1: /odometry/stereo
+odom1_config: [true, true, false,  # Fuse XY only
+               false, false, false,
+               false, false, false,
+               false, false, false, 
+               false, false, false]
+odom1_differential: true
+odom1_queue_size: 5
+
+# IMU (orientation)
+imu0: /imu/data
+imu0_config: [false, false, false,
+              true, true, false,   # Fuse roll/pitch only
+              false, false, false,
+              true,  true,  true,   # Angular velocity
+              false, false, false]
+imu0_queue_size: 20
+
+# Magnetometer (heading)
+mag0: /mag
+mag0_config: [false, false, false,
+              false, false, true,  # Fuse yaw only
+              false, false, false,
+              false, false, false,
+              false, false, false]
+mag0_differential: true  # Enable for better heading
+mag0_rejection_threshold: 0.5  # Add this
+mag0_queue_size: 10
+
+
+# frequency: 10.0
+# world_frame: map
+
+
+# sensor_timeout: 1.0
+# map_frame: map
+# odom_frame: odom
+# base_link_frame: base_link
+
+# print_diagnostics: true
+# debug: true
+# two_d_mode: false                # Constrain to 2D plane
+# # transform_time_offset: 0.0      # No artificial delay
+# # transform_timeout: 0.0          # Disable transform timeout
+# predict_to_current_time: false  # Disable for low-frequency global EKF
+
+# # GPS (absolute position)
+# odom0: /odometry/gps
+# odom0_config: [true, true, true,   # Fuse XYZ position
+#                false, false, false,
+#                false, false, false,
+#                false, false, false,
+#                false, false, false]
+# odom0_differential: false
+# odom0_queue_size: 10
+# odom0_relative: false
+
+# # Stereo Odometry (relative position when GPS drops)
+# odom1: /odometry/stereo
+# odom1_config: [true, true, false,  # Fuse XY only
+#                true, true, false,
+#                false, false, false,
+#                false, false, false, 
+#                false, false, false]
+# odom1_differential: true
+# odom1_queue_size: 5
+
+# # IMU (orientation)
+# imu0: /imu/data
+# imu0_config: [false, false, false,
+#               true,  true,  true,    # Orientation
+#               false, false, false,
+#               true,  true,  true,    # Angular velocity
+#               true,  true,  true]    # Linear acceleration
+# imu0_queue_size: 20
+
+# # # Magnetometer (heading)
+# # mag0: /mag
+# # mag0_config: [false, false, false,
+# #               false, false, true,  # Fuse yaw only
+# #               false, false, false,
+# #               false, false, false,
+# #               false, false, false]
+# # mag0_queue_size: 10
